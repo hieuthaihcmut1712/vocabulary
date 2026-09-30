@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vocabulary-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vocabulary_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: vocabulary-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Giao diện Web trực quan quản lý Redis (mở http://localhost:5540)
+  redis-insight:
+    image: redis/redis-insight:latest
+    container_name: vocabulary-redis-insight
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis_insight_data:/data
+    depends_on:
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
+  redis_insight_data:
