@@ -211,12 +211,12 @@ export default function ReverseQuizPage() {
         responseTime: responseTime
       });
 
-      if (data.deckProgressPercent !== undefined) {
+      if (data.deckProgressPercent !== undefined && data.deckProgressPercent !== null) {
         setDeckInfo((prev) => ({
           ...prev,
-          progress: data.deckProgressPercent,
-          mastered: data.masteredWords,
-          learning: data.learningWords
+          progress: Number(data.deckProgressPercent) || 0,
+          mastered: data.masteredWords != null ? data.masteredWords : prev.mastered,
+          learning: data.learningWords != null ? data.learningWords : prev.learning
         }));
       }
 
@@ -384,7 +384,7 @@ export default function ReverseQuizPage() {
                 Đang nhớ: <b>{deckInfo.learning}</b>
               </span>
               <span className="px-2 py-0.5 rounded-lg bg-indigo-950/80 text-indigo-300 font-mono font-black border border-indigo-600/40 text-xs">
-                {deckInfo.progress.toFixed(1)}%
+                {Number(deckInfo?.progress || 0).toFixed(1)}%
               </span>
             </div>
           </div>
@@ -392,7 +392,7 @@ export default function ReverseQuizPage() {
           <div className="w-full h-3 bg-purple-950 rounded-full overflow-hidden p-0.5 border border-purple-800/50 shadow-inner">
             <div 
               className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full transition-all duration-500 shadow-sm"
-              style={{ width: `${Math.min(100, Math.max(deckInfo.progress > 0 ? 3 : 0, deckInfo.progress))}%` }}
+              style={{ width: `${Math.min(100, Math.max(Number(deckInfo?.progress || 0) > 0 ? 3 : 0, Number(deckInfo?.progress || 0)))}%` }}
             />
           </div>
         </div>

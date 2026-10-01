@@ -425,7 +425,7 @@ export default function ListeningDrillPage() {
                 Cần học: <b>{deckProgress.unlearned}</b>
               </span>
               <span className="px-2 py-0.5 rounded-lg bg-cyan-950/80 text-cyan-300 font-mono font-black border border-cyan-600/40 text-xs">
-                {deckProgress.percent.toFixed(1)}%
+                {Number(deckProgress?.percent || 0).toFixed(1)}%
               </span>
             </div>
           </div>
@@ -434,12 +434,12 @@ export default function ListeningDrillPage() {
           <div className="w-full h-3 bg-purple-950 rounded-full overflow-hidden p-0.5 border border-purple-800/50 shadow-inner">
             <div 
               className="h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-400 rounded-full transition-all duration-500 shadow-sm"
-              style={{ width: `${Math.min(100, Math.max(deckProgress.percent > 0 ? 3 : 0, deckProgress.percent))}%` }}
+              style={{ width: `${Math.min(100, Math.max(Number(deckProgress?.percent || 0) > 0 ? 3 : 0, Number(deckProgress?.percent || 0)))}%` }}
             />
           </div>
 
           {/* Nếu đạt 100% thì thông báo mở khóa Luyện tập */}
-          {deckProgress.percent >= 100 && (
+          {(deckProgress?.percent || 0) >= 100 && (
             <div className="mt-2.5 p-2 bg-emerald-950/60 border border-emerald-500/50 rounded-xl flex items-center justify-between text-xs text-emerald-200">
               <span className="flex items-center gap-1.5 font-bold">
                 <Sparkles size={14} className="text-yellow-400 animate-spin" />

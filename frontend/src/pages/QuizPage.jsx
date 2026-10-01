@@ -155,12 +155,12 @@ export default function QuizPage() {
       const data = await res.json();
       setQuestion(data);
 
-      if (data.deckProgressPercent !== undefined) {
+      if (data.deckProgressPercent !== undefined && data.deckProgressPercent !== null) {
         setDeckInfo({
           name: data.deckName || 'Bộ từ vựng',
-          progress: data.deckProgressPercent || 0,
-          mastered: data.masteredWords || 0,
-          learning: data.learningWords || 0
+          progress: Number(data.deckProgressPercent) || 0,
+          mastered: data.masteredWords != null ? data.masteredWords : 0,
+          learning: data.learningWords != null ? data.learningWords : 0
         });
       }
 
@@ -220,54 +220,55 @@ export default function QuizPage() {
       });
 
       const resData = await res.json();
-      setResult(resData);
-      playSound(resData.isCorrect);
-      speakText(question.term);
+      if (res.ok && resData) {
+        setResult(resData);
+        playSound(Boolean(resData.isCorrect));
+        if (question?.term) speakText(question.term);
 
-      // Cập nhật ngay tiến độ bộ thẻ mới nhất
-      if (resData.deckProgressPercent !== undefined) {
-        setDeckInfo((prev) => ({
-          ...prev,
-          progress: resData.deckProgressPercent,
-          mastered: resData.masteredWords !== undefined ? resData.masteredWords : prev.mastered,
-          learning: resData.learningWords !== undefined ? resData.learningWords : prev.learning
-        }));
-      }
-
-      if (resData.isCorrect) {
-        const newStreak = streak + 1;
-        setStreak(newStreak);
-        const earnedScore = Math.max(10, Math.round(100 - finalResponseTime * 12));
-        setScore((prev) => prev + earnedScore);
-
-        if (newStreak >= 3 && newStreak % 2 === 1) {
-          triggerConfetti();
+        // Cập nhật ngay tiến độ bộ thẻ mới nhất an toàn
+        if (resData.deckProgressPercent !== undefined && resData.deckProgressPercent !== null) {
+          setDeckInfo((prev) => ({
+            ...prev,
+            progress: Number(resData.deckProgressPercent) || 0,
+            mastered: resData.masteredWords != null ? resData.masteredWords : prev.mastered,
+            learning: resData.learningWords != null ? resData.learningWords : prev.learning
+          }));
         }
 
-        // ĐÚNG: chuyển câu nhanh sau 1.4s
-        nextTimeoutRef.current = setTimeout(() => {
-          advanceNextQuestion();
-        }, 1400);
+        if (resData.isCorrect) {
+          const newStreak = streak + 1;
+          setStreak(newStreak);
+          const earnedScore = Math.max(10, Math.round(100 - finalResponseTime * 12));
+          setScore((prev) => prev + earnedScore);
 
-      } else {
-        // SAI: Dừng 5s để ghi nhớ
-        setStreak(0);
-        setWrongCountdown(5);
-
-        let secondsRemaining = 5;
-        countdownIntervalRef.current = setInterval(() => {
-          secondsRemaining -= 1;
-          setWrongCountdown(secondsRemaining);
-          if (secondsRemaining <= 0) {
-            clearInterval(countdownIntervalRef.current);
+          if (newStreak >= 3 && newStreak % 2 === 1) {
+            triggerConfetti();
           }
-        }, 1000);
 
-        nextTimeoutRef.current = setTimeout(() => {
-          advanceNextQuestion();
-        }, 5000);
+          // ĐÚNG: chuyển câu nhanh sau 1.4s
+          nextTimeoutRef.current = setTimeout(() => {
+            advanceNextQuestion();
+          }, 1400);
+
+        } else {
+          // SAI: Dừng 5s để ghi nhớ
+          setStreak(0);
+          setWrongCountdown(5);
+
+          let secondsRemaining = 5;
+          countdownIntervalRef.current = setInterval(() => {
+            secondsRemaining -= 1;
+            setWrongCountdown(secondsRemaining);
+            if (secondsRemaining <= 0) {
+              clearInterval(countdownIntervalRef.current);
+            }
+          }, 1000);
+
+          nextTimeoutRef.current = setTimeout(() => {
+            advanceNextQuestion();
+          }, 5000);
+        }
       }
-
     } catch (err) {
       console.error("Lỗi submit", err);
       setIsLocked(false);
@@ -391,7 +392,7 @@ export default function QuizPage() {
             </div>
             <div className="flex items-center space-x-1.5 bg-purple-950/70 px-2.5 py-0.5 rounded-full border border-purple-700/40">
               <span className="text-[11px] text-purple-300 font-semibold">Tiến độ:</span>
-              <span className="font-black text-emerald-400 font-mono text-sm">{deckInfo.progress.toFixed(1)}%</span>
+              <span className="font-black text-emerald-400 font-mono text-sm">{Number(deckInfo?.progress || 0).toFixed(1)}%</span>
             </div>
           </div>
 
@@ -400,7 +401,7 @@ export default function QuizPage() {
             <div className="w-full bg-purple-950/80 h-3 rounded-full overflow-hidden p-0.5 border border-purple-800/40 shadow-inner">
               <div 
                 className="h-full bg-gradient-to-r from-teal-400 via-emerald-400 to-green-400 rounded-full transition-all duration-700 shadow-sm"
-                style={{ width: `${Math.min(100, Math.max(deckInfo.progress > 0 ? 3 : 0, deckInfo.progress))}%` }}
+                style={{ width: `${Math.min(100, Math.max(Number(deckInfo?.progress || 0) > 0 ? 3 : 0, Number(deckInfo?.progress || 0)))}%` }}
               />
             </div>
           </div>

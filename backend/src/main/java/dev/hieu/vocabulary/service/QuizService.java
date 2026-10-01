@@ -190,6 +190,15 @@ public class QuizService {
         // Trộn ngẫu nhiên vị trí của 4 đáp án
         Collections.shuffle(options);
 
+        // Thông tin thống kê bộ thẻ hiện tại
+        Deck deck = deckRepository.findById(deckId).orElse(null);
+        String deckName = deck != null ? deck.getName() : "Bộ từ vựng";
+
+        long mastered = progressList.stream().filter(p -> p.getWeight() != null && p.getWeight() == 1).count();
+        long learning = progressList.stream().filter(p -> p.getWeight() != null && p.getWeight() > 1 && p.getWeight() < 5).count();
+        long unlearned = Math.max(0, progressList.size() - mastered - learning);
+        double deckProgressPercent = calculateProgressPercent(progressList.size(), mastered, learning);
+
         return QuizQuestionDto.builder()
                 .wordId(targetWord.getId())
                 .term(targetWord.getTerm())
@@ -199,6 +208,12 @@ public class QuizService {
                 .currentWeight(selectedProgress.getWeight())
                 .probabilityPercent(Math.round(probabilityPercent * 10.0) / 10.0)
                 .totalWords(progressList.size())
+                .deckId(deckId)
+                .deckName(deckName)
+                .deckProgressPercent(deckProgressPercent)
+                .masteredWords(mastered)
+                .learningWords(learning)
+                .unlearnedWords(unlearned)
                 .build();
     }
 
@@ -258,6 +273,14 @@ public class QuizService {
                 .build();
         reviewLogRepository.save(log);
 
+        // Thống kê tiến độ mới nhất của bộ thẻ sau khi cập nhật
+        Long targetDeckId = progress.getDeckId();
+        List<WordProgress> allProgress = wordProgressRepository.findByDeckId(targetDeckId);
+        int totalWords = allProgress.size();
+        long updatedMastered = allProgress.stream().filter(p -> p.getWeight() != null && p.getWeight() == 1).count();
+        long updatedLearning = allProgress.stream().filter(p -> p.getWeight() != null && p.getWeight() > 1 && p.getWeight() < 5).count();
+        double updatedProgressPercent = calculateProgressPercent(totalWords, updatedMastered, updatedLearning);
+
         return QuizResultDto.builder()
                 .isCorrect(isCorrect)
                 .correctMeaning(word.getMeaning())
@@ -266,6 +289,9 @@ public class QuizService {
                 .weightDelta(delta)
                 .responseTimeSeconds(responseTime)
                 .feedbackMessage(feedback)
+                .deckProgressPercent(updatedProgressPercent)
+                .masteredWords(updatedMastered)
+                .learningWords(updatedLearning)
                 .build();
     }
 
