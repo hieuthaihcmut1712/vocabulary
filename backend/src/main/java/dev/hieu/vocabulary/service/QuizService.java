@@ -1,20 +1,20 @@
 package dev.hieu.vocabulary.service;
 
-import dev.hieu.vocabulary.dto.QuizQuestionDto;
-import dev.hieu.vocabulary.dto.QuizResultDto;
-import dev.hieu.vocabulary.dto.QuizSubmitRequest;
+import dev.hieu.vocabulary.dto.*;
+import dev.hieu.vocabulary.entity.Deck;
+import dev.hieu.vocabulary.entity.ListeningProgress;
+import dev.hieu.vocabulary.entity.ReverseWordProgress;
 import dev.hieu.vocabulary.entity.ReviewLog;
 import dev.hieu.vocabulary.entity.Word;
 import dev.hieu.vocabulary.entity.WordProgress;
-import dev.hieu.vocabulary.repository.ReviewLogRepository;
-import dev.hieu.vocabulary.repository.WordProgressRepository;
-import dev.hieu.vocabulary.repository.WordRepository;
+import dev.hieu.vocabulary.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -22,30 +22,138 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class QuizService {
 
+    private final DeckRepository deckRepository;
     private final WordRepository wordRepository;
     private final WordProgressRepository wordProgressRepository;
+    private final ReverseWordProgressRepository reverseWordProgressRepository;
+    private final ListeningProgressRepository listeningProgressRepository;
     private final ReviewLogRepository reviewLogRepository;
+
+    // Cooldown queue theo từng deck để tránh lặp lại từ vừa xuất hiện
+    private final Map<Long, Queue<Long>> recentWordHistory = new ConcurrentHashMap<>();
+
+    /**
+     * Lấy danh sách các bộ thẻ kèm thống kê tiến độ chi tiết của cả 3 kỹ năng
+     */
+    @Transactional
+    public List<DeckSummaryDto> getDecksWithProgress() {
+        List<Deck> decks = deckRepository.findAll();
+        List<DeckSummaryDto> summaries = new ArrayList<>();
+
+        for (Deck deck : decks) {
+            Long deckId = deck.getId();
+            List<Word> words = wordRepository.findByDeckId(deckId);
+            int totalWords = words.size();
+            if (totalWords == 0) continue;
+
+            // 1. Quizziz Anh -> Việt (WordProgress)
+            List<WordProgress> quizProgressList = wordProgressRepository.findByDeckId(deckId);
+            long mastered = quizProgressList.stream().filter(p -> p.getWeight() != null && p.getWeight() == 1).count();
+            long learning = quizProgressList.stream().filter(p -> p.getWeight() != null && p.getWeight() > 1 && p.getWeight() < 5).count();
+            long unlearned = Math.max(0, totalWords - mastered - learning);
+            double progressPercent = calculateProgressPercent(totalWords, mastered, learning);
+            boolean quizUnlocked = Boolean.TRUE.equals(deck.getQuizPracticeUnlocked()) || progressPercent >= 100.0;
+            if (progressPercent >= 100.0 && !Boolean.TRUE.equals(deck.getQuizPracticeUnlocked())) {
+                deck.setQuizPracticeUnlocked(true);
+                deckRepository.save(deck);
+            }
+
+            // 2. Quizziz Việt -> Anh (ReverseWordProgress)
+            List<ReverseWordProgress> reverseList = reverseWordProgressRepository.findByDeckId(deckId);
+            long revMastered = reverseList.stream().filter(p -> p.getWeight() != null && p.getWeight() == 1).count();
+            long revLearning = reverseList.stream().filter(p -> p.getWeight() != null && p.getWeight() > 1 && p.getWeight() < 5).count();
+            long revUnlearned = Math.max(0, totalWords - revMastered - revLearning);
+            double revProgressPercent = calculateProgressPercent(totalWords, revMastered, revLearning);
+            boolean revUnlocked = Boolean.TRUE.equals(deck.getReversePracticeUnlocked()) || revProgressPercent >= 100.0;
+            if (revProgressPercent >= 100.0 && !Boolean.TRUE.equals(deck.getReversePracticeUnlocked())) {
+                deck.setReversePracticeUnlocked(true);
+                deckRepository.save(deck);
+            }
+
+            // 3. Luyện nghe (ListeningProgress)
+            List<ListeningProgress> listeningList = listeningProgressRepository.findByDeckId(deckId);
+            long listMastered = listeningList.stream().filter(p -> p.getWeight() != null && p.getWeight() == 1).count();
+            long listLearning = listeningList.stream().filter(p -> p.getWeight() != null && p.getWeight() > 1 && p.getWeight() < 3).count();
+            long listUnlearned = Math.max(0, totalWords - listMastered - listLearning);
+            double listProgressPercent = calculateProgressPercent(totalWords, listMastered, listLearning);
+            boolean listUnlocked = Boolean.TRUE.equals(deck.getListeningPracticeUnlocked()) || listProgressPercent >= 100.0;
+            if (listProgressPercent >= 100.0 && !Boolean.TRUE.equals(deck.getListeningPracticeUnlocked())) {
+                deck.setListeningPracticeUnlocked(true);
+                deckRepository.save(deck);
+            }
+
+            summaries.add(DeckSummaryDto.builder()
+                    .id(deckId)
+                    .name(deck.getName())
+                    .description(deck.getDescription())
+                    .totalWords(totalWords)
+                    .masteredWords(mastered)
+                    .learningWords(learning)
+                    .unlearnedWords(unlearned)
+                    .progressPercent(progressPercent)
+                    .quizPracticeUnlocked(quizUnlocked)
+                    .reverseMasteredWords(revMastered)
+                    .reverseLearningWords(revLearning)
+                    .reverseUnlearnedWords(revUnlearned)
+                    .reverseProgressPercent(revProgressPercent)
+                    .reversePracticeUnlocked(revUnlocked)
+                    .listeningMasteredWords(listMastered)
+                    .listeningLearningWords(listLearning)
+                    .listeningUnlearnedWords(listUnlearned)
+                    .listeningProgressPercent(listProgressPercent)
+                    .listeningPracticeUnlocked(listUnlocked)
+                    .build());
+        }
+
+        return summaries;
+    }
 
     /**
      * Bốc ngẫu nhiên một từ theo tỉ lệ trọng số (Roulette Wheel Selection)
      * và sinh 4 đáp án (1 đúng + 3 ngẫu nhiên).
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public QuizQuestionDto getNextQuestion(Long deckId) {
         List<WordProgress> progressList = wordProgressRepository.findByDeckId(deckId);
         if (progressList.isEmpty()) {
-            throw new IllegalArgumentException("Không tìm thấy từ vựng nào trong bộ thẻ ID: " + deckId);
+            List<Word> allDeckWords = wordRepository.findByDeckId(deckId);
+            if (allDeckWords.isEmpty()) {
+                throw new IllegalArgumentException("Không tìm thấy từ vựng nào trong bộ thẻ ID: " + deckId);
+            }
+            List<WordProgress> newProg = allDeckWords.stream()
+                    .map(w -> WordProgress.builder()
+                            .deckId(deckId)
+                            .word(w)
+                            .weight(10)
+                            .correctCount(0)
+                            .wrongCount(0)
+                            .build())
+                    .collect(Collectors.toList());
+            progressList = wordProgressRepository.saveAll(newProg);
+        }
+
+        Queue<Long> history = recentWordHistory.computeIfAbsent(deckId, k -> new LinkedList<>());
+
+        // Lọc bớt các từ vừa hỏi gần đây nếu tổng số từ đủ nhiều (> 5)
+        List<WordProgress> candidateList = progressList;
+        if (progressList.size() > 5) {
+            List<WordProgress> filtered = progressList.stream()
+                    .filter(wp -> !history.contains(wp.getWord().getId()))
+                    .collect(Collectors.toList());
+            if (!filtered.isEmpty()) {
+                candidateList = filtered;
+            }
         }
 
         // Tính tổng trọng số
-        int totalWeight = progressList.stream().mapToInt(WordProgress::getWeight).sum();
+        int totalWeight = candidateList.stream().mapToInt(WordProgress::getWeight).sum();
 
         // Bốc ngẫu nhiên theo trọng số
         int randomValue = ThreadLocalRandom.current().nextInt(totalWeight);
         int accumulatedWeight = 0;
-        WordProgress selectedProgress = progressList.get(0);
+        WordProgress selectedProgress = candidateList.get(0);
 
-        for (WordProgress wp : progressList) {
+        for (WordProgress wp : candidateList) {
             accumulatedWeight += wp.getWeight();
             if (randomValue < accumulatedWeight) {
                 selectedProgress = wp;
@@ -55,6 +163,12 @@ public class QuizService {
 
         Word targetWord = selectedProgress.getWord();
         double probabilityPercent = ((double) selectedProgress.getWeight() / totalWeight) * 100.0;
+
+        // Cập nhật cooldown history (giữ tối đa 4 từ gần nhất)
+        history.offer(targetWord.getId());
+        if (history.size() > 4) {
+            history.poll();
+        }
 
         // Lấy 3 đáp án nhiễu ngẫu nhiên từ các từ khác trong bộ thẻ
         List<Word> allWords = wordRepository.findByDeckId(deckId);
@@ -89,8 +203,7 @@ public class QuizService {
     }
 
     /**
-     * Chấm điểm câu trả lời, tính toán lại trọng số theo thời gian phản xạ và lưu
-     * lịch sử.
+     * Chấm điểm câu trả lời, tính toán lại trọng số theo thời gian phản xạ và lưu lịch sử.
      */
     @Transactional
     public QuizResultDto submitAnswer(QuizSubmitRequest request) {
@@ -154,5 +267,69 @@ public class QuizService {
                 .responseTimeSeconds(responseTime)
                 .feedbackMessage(feedback)
                 .build();
+    }
+
+    /**
+     * Khởi tạo dữ liệu cho chế độ Luyện tập Anh -> Việt
+     */
+    @Transactional
+    public PracticeInitDto getPracticeInit(Long deckId) {
+        Deck deck = deckRepository.findById(deckId).orElse(null);
+        String deckName = deck != null ? deck.getName() : "Bộ từ vựng";
+
+        List<WordProgress> allProgress = wordProgressRepository.findByDeckId(deckId);
+        int totalWords = allProgress.size();
+        long mastered = allProgress.stream().filter(wp -> wp.getWeight() != null && wp.getWeight() == 1).count();
+        long learning = allProgress.stream().filter(wp -> wp.getWeight() != null && wp.getWeight() > 1 && wp.getWeight() < 5).count();
+        double progressPercent = calculateProgressPercent(totalWords, mastered, learning);
+
+        boolean unlocked = (deck != null && Boolean.TRUE.equals(deck.getQuizPracticeUnlocked())) || progressPercent >= 100.0;
+        if (deck != null && progressPercent >= 100.0 && !Boolean.TRUE.equals(deck.getQuizPracticeUnlocked())) {
+            deck.setQuizPracticeUnlocked(true);
+            deckRepository.save(deck);
+        }
+
+        List<Word> words = wordRepository.findByDeckId(deckId);
+        List<WordDto> wordDtos = words.stream()
+                .map(w -> WordDto.builder()
+                        .id(w.getId())
+                        .term(w.getTerm())
+                        .partOfSpeech(w.getPartOfSpeech())
+                        .phonetic(w.getPhonetic())
+                        .meaning(w.getMeaning())
+                        .build())
+                .collect(Collectors.toList());
+
+        return PracticeInitDto.builder()
+                .deckId(deckId)
+                .deckName(deckName)
+                .quizProgressPercent(progressPercent)
+                .unlocked(unlocked)
+                .words(wordDtos)
+                .build();
+    }
+
+    /**
+     * Lấy danh sách toàn bộ từ vựng trong bộ thẻ
+     */
+    @Transactional(readOnly = true)
+    public List<WordDto> getWordsByDeck(Long deckId) {
+        List<Word> words = wordRepository.findByDeckId(deckId);
+        return words.stream()
+                .map(w -> WordDto.builder()
+                        .id(w.getId())
+                        .term(w.getTerm())
+                        .partOfSpeech(w.getPartOfSpeech())
+                        .phonetic(w.getPhonetic())
+                        .meaning(w.getMeaning())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private double calculateProgressPercent(int totalWords, long mastered, long learning) {
+        if (totalWords <= 0) return 0.0;
+        double totalScore = (mastered * 1.0) + (learning * 0.5);
+        double percent = (totalScore / totalWords) * 100.0;
+        return Math.round(percent * 10.0) / 10.0;
     }
 }
