@@ -60,13 +60,7 @@ jobs:
           # Di chuyển file jar mới vào thư mục chính
           mv ~/app_temp/vocabulary-0.0.1-SNAPSHOT.jar ~/app.jar
           
-          # Tắt tiến trình ứng dụng cũ (nếu có)
-          sudo pkill -f app.jar || true
+          # Khởi động lại service hệ thống tự động
+          sudo systemctl restart vocabulary
           
-          # Khởi động lại ứng dụng ngầm với giới hạn bộ nhớ 400MB (phù hợp EC2 1GB RAM)
-          nohup java -Xmx400m -jar ~/app.jar \
-            --spring.datasource.url=jdbc:postgresql://localhost:5432/vocabulary_db \
-            --spring.datasource.username=postgres \
-            --spring.datasource.password=123456 > app.log 2>&1 &
-          
-          echo "Deploy completed successfully! App is running on port 8080."
+          echo "Deploy completed successfully! App is running."
