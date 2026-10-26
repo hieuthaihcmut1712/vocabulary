@@ -15,4 +15,10 @@ public interface ReverseWordProgressRepository extends JpaRepository<ReverseWord
     Optional<ReverseWordProgress> findByWordId(Long wordId);
 
     void deleteByDeckId(Long deckId);
+
+    List<ReverseWordProgress> findByDeckIdAndUserProfile(Long deckId, String userProfile);
+
+    Optional<ReverseWordProgress> findByWordIdAndUserProfile(Long wordId, String userProfile);
+
+    void deleteByDeckIdAndUserProfile(Long deckId, String userProfile);
 }

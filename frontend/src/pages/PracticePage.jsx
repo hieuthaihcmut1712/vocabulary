@@ -19,6 +19,7 @@ import {
   Lock,
   RotateCcw
 } from 'lucide-react';
+import { useStudyTracker } from '../hooks/useStudyTracker';
 
 const CARD_THEMES = [
   'quiz-card-blue',
@@ -35,6 +36,9 @@ export default function PracticePage() {
   const [loading, setLoading] = useState(true);
   const [initData, setInitData] = useState(null);
   const [words, setWords] = useState([]);
+
+  // Đếm thời gian học
+  const { formattedSessionTime, isActive } = useStudyTracker({ mode: 'PRACTICE', deckId, enabled: true });
 
   // Trọng số in-memory (KHÔNG lưu Database)
   // Mỗi từ khởi tạo trọng số = 5, min = 1, max = 10
@@ -151,22 +155,27 @@ export default function PracticePage() {
     setElapsedTime(0);
     setIsLocked(false);
 
-    // 1. Cooldown buffer (bỏ qua 5-8 từ vừa xuất hiện gần nhất)
+    // 1. Cooldown buffer (bỏ qua 1/3 số từ vừa xuất hiện gần nhất)
     const recentQueue = recentHistoryRef.current;
-    const cooldownLimit = Math.min(8, Math.max(1, Math.floor(wordList.length / 3)));
+    const cooldownLimit = Math.max(1, Math.floor(wordList.length / 3));
 
     let candidates = wordList.filter(w => !recentQueue.includes(w.id));
     if (candidates.length === 0) {
       candidates = wordList;
     }
 
-    // 2. Tính tổng trọng số và bốc ngẫu nhiên (Roulette wheel)
-    const totalWeight = candidates.reduce((sum, w) => sum + (weights[w.id] || 5), 0);
+    // 2. Tính tổng trọng số và bốc ngẫu nhiên (Roulette wheel, nếu từ về 1 thì tỉ lệ xuất hiện là 0.5)
+    const getEffectiveWeight = (wId) => {
+      const wt = weights[wId] !== undefined ? weights[wId] : 5;
+      return wt <= 1 ? 0.5 : wt;
+    };
+
+    const totalWeight = candidates.reduce((sum, w) => sum + getEffectiveWeight(w.id), 0);
     let randomVal = Math.random() * totalWeight;
     let chosenWord = candidates[0];
 
     for (const w of candidates) {
-      const wWeight = weights[w.id] || 5;
+      const wWeight = getEffectiveWeight(w.id);
       randomVal -= wWeight;
       if (randomVal <= 0) {
         chosenWord = w;
@@ -194,7 +203,7 @@ export default function PracticePage() {
       partOfSpeech: chosenWord.partOfSpeech,
       phonetic: chosenWord.phonetic,
       meaning: chosenWord.meaning,
-      currentWeight: weights[chosenWord.id] || 5,
+      currentWeight: getEffectiveWeight(chosenWord.id),
       options: allOptions
     });
 
@@ -517,6 +526,19 @@ export default function PracticePage() {
             <span className="hidden md:inline-flex text-[11px] font-bold px-2 py-0.5 rounded-lg bg-teal-500/20 text-teal-300 border border-teal-500/30">
               🎯 Luyện tập (In-Memory)
             </span>
+
+            {/* Đồng hồ đếm thời gian học */}
+            <div
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-xl border text-xs font-semibold shadow-sm transition-all ${
+                isActive 
+                  ? 'bg-purple-900/60 border-purple-700/60 text-purple-200' 
+                  : 'bg-zinc-800/40 border-zinc-700/40 text-zinc-400 opacity-60'
+              }`}
+              title={isActive ? "Đang đếm thời gian học chủ động" : "Tạm dừng đếm giờ (tab ẩn hoặc nhàn rỗi)"}
+            >
+              <Clock size={13} className={isActive ? "text-cyan-400 animate-pulse" : "text-zinc-500"} />
+              <span className="font-mono text-xs">{formattedSessionTime}</span>
+            </div>
           </div>
 
           {/* Nhóm giữa: Đồng hồ phản xạ thời gian thực */}

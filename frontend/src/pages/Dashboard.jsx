@@ -11,16 +11,43 @@ import {
   Lock,
   Target,
   Headphones,
-  Languages
+  Languages,
+  Clock,
+  FileText
 } from 'lucide-react';
+import StudyChart from '../components/StudyChart';
+import ProfileSwitcher from '../components/ProfileSwitcher';
+import { useProfile } from '../context/ProfileContext';
 
 export default function Dashboard() {
+  const { profile, isDTan } = useProfile();
   const [decks, setDecks] = useState([]);
   const [comprehensiveStatus, setComprehensiveStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [studyStats, setStudyStats] = useState(null);
+  const [studyLoading, setStudyLoading] = useState(true);
+  const [chartDays, setChartDays] = useState(7);
+  const [lessonGroup, setLessonGroup] = useState('1-10');
   const navigate = useNavigate();
 
-  const fetchDecks = async () => {
+  const fetchStudyStats = async (days = chartDays) => {
+    if (isDTan) return;
+    setStudyLoading(true);
+    setChartDays(days);
+    try {
+      const res = await fetch(`/api/study/stats?days=${days}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStudyStats(data);
+      }
+    } catch (err) {
+      console.error("Lỗi tải thống kê học tập", err);
+    } finally {
+      setStudyLoading(false);
+    }
+  };
+
+  const fetchDecks = async (currentIsDTan = isDTan) => {
     setLoading(true);
     try {
       const res = await fetch('/api/quiz/decks');
@@ -28,10 +55,12 @@ export default function Dashboard() {
       const data = await res.json();
       setDecks(data);
 
-      const resComp = await fetch('/api/exercises/status?deckId=0');
-      if (resComp.ok) {
-        const compData = await resComp.json();
-        setComprehensiveStatus(compData);
+      if (!currentIsDTan) {
+        const resComp = await fetch('/api/exercises/status?deckId=0');
+        if (resComp.ok) {
+          const compData = await resComp.json();
+          setComprehensiveStatus(compData);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -41,18 +70,26 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    fetchDecks();
-  }, []);
+    fetchDecks(isDTan);
+    if (!isDTan) {
+      fetchStudyStats();
+    }
+  }, [profile, isDTan]);
 
-  const totalWordsAll = decks.reduce((acc, d) => acc + (d.totalWords || 0), 0);
-  const avgQuizProgress = decks.length > 0 
-    ? Math.round((decks.reduce((acc, d) => acc + (d.progressPercent || 0), 0) / decks.length) * 10) / 10 
+  // Đối với DTan: Chỉ lấy đúng 10 phần của 600 TOEIC và sắp xếp theo đúng trình tự từ Phần 1 đến Phần 10
+  const displayedDecks = isDTan
+    ? decks.filter((d) => (d.id >= 19 && d.id <= 28) || (d.name && d.name.includes('600 TOEIC'))).sort((a, b) => a.id - b.id)
+    : decks;
+
+  const totalWordsAll = displayedDecks.reduce((acc, d) => acc + (d.totalWords || 0), 0);
+  const avgQuizProgress = displayedDecks.length > 0 
+    ? Math.round((displayedDecks.reduce((acc, d) => acc + (d.progressPercent || 0), 0) / displayedDecks.length) * 10) / 10 
     : 0;
-  const avgReverseProgress = decks.length > 0 
-    ? Math.round((decks.reduce((acc, d) => acc + (d.reverseProgressPercent || 0), 0) / decks.length) * 10) / 10 
+  const avgReverseProgress = displayedDecks.length > 0 
+    ? Math.round((displayedDecks.reduce((acc, d) => acc + (d.reverseProgressPercent || 0), 0) / displayedDecks.length) * 10) / 10 
     : 0;
-  const avgListeningProgress = decks.length > 0 
-    ? Math.round((decks.reduce((acc, d) => acc + (d.listeningProgressPercent || 0), 0) / decks.length) * 10) / 10 
+  const avgListeningProgress = displayedDecks.length > 0 
+    ? Math.round((displayedDecks.reduce((acc, d) => acc + (d.listeningProgressPercent || 0), 0) / displayedDecks.length) * 10) / 10 
     : 0;
 
   return (
@@ -62,24 +99,38 @@ export default function Dashboard() {
       <div className="w-full max-w-7xl mx-auto">
         <header className="flex flex-col md:flex-row items-center justify-between py-4 px-6 bg-[#321345] rounded-3xl shadow-2xl border border-purple-800/40 gap-4">
           <div className="flex items-center space-x-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-600/30">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg ${
+              isDTan
+                ? 'bg-gradient-to-tr from-teal-500 to-cyan-400 shadow-teal-500/30'
+                : 'bg-gradient-to-tr from-purple-600 to-pink-500 shadow-purple-600/30'
+            }`}>
               <GraduationCap size={28} className="text-white" />
             </div>
             <div>
               <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2">
                 Vocabulary Mastery
-                <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">Quizizz 3-Skills</span>
+                <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
+                  isDTan
+                    ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                    : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                }`}>
+                  {isDTan ? '✨ Phiên bản DTan' : '👑 Bản gốc (Tôi)'}
+                </span>
               </h1>
-              <p className="text-xs text-purple-300 font-medium">Luyện phản xạ từ vựng 2 chiều (Anh-Việt, Việt-Anh) & Nghe chính tả ngắt quãng</p>
+              <p className="text-xs text-purple-300 font-medium">
+                {isDTan 
+                  ? 'Ôn 600 từ vựng 2 chiều (Anh-Việt, Việt-Anh) • 10 Đoạn đọc điền • 50 Lesson TOEIC'
+                  : 'Luyện phản xạ từ vựng 2 chiều (Anh-Việt, Việt-Anh) & Nghe chính tả ngắt quãng'}
+              </p>
             </div>
           </div>
 
-          {/* Quick Stats Badges */}
+          {/* Quick Stats Badges & Profile Switcher */}
           <div className="flex items-center flex-wrap gap-2 text-xs md:text-sm">
             <div className="bg-purple-950/60 px-3 py-1.5 rounded-2xl border border-purple-800/40 flex items-center space-x-2">
               <Layers size={15} className="text-purple-400" />
               <span className="text-purple-300">Bộ thẻ:</span>
-              <span className="font-extrabold text-white">{decks.length}</span>
+              <span className="font-extrabold text-white">{displayedDecks.length}</span>
             </div>
 
             <div className="bg-purple-950/60 px-3 py-1.5 rounded-2xl border border-purple-800/40 flex items-center space-x-2">
@@ -102,8 +153,21 @@ export default function Dashboard() {
 
             <div className="bg-cyan-950/40 border border-cyan-500/30 px-3 py-1.5 rounded-2xl flex items-center space-x-2">
               <Headphones size={15} className="text-cyan-400" />
-              <span className="text-cyan-300">Nghe:</span>
+              <span className="text-cyan-300">Nghe &amp; Gõ:</span>
               <span className="font-extrabold text-cyan-300">{avgListeningProgress}%</span>
+            </div>
+
+            {!isDTan && (
+              <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 px-3 py-1.5 rounded-2xl flex items-center space-x-2">
+                <Clock size={15} className="text-amber-400 animate-pulse" />
+                <span className="text-amber-300">Học hôm nay:</span>
+                <span className="font-extrabold text-amber-200 font-mono">{studyStats?.todayFormatted || '0 phút'}</span>
+              </div>
+            )}
+
+            {/* Profile Switcher Component */}
+            <div className="ml-1">
+              <ProfileSwitcher />
             </div>
           </div>
         </header>
@@ -112,11 +176,13 @@ export default function Dashboard() {
         <div className="my-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h2 className="text-3xl md:text-4xl font-black text-white tracking-wide flex items-center gap-3">
-              <span>Các bộ thẻ của bạn</span>
+              <span>{isDTan ? '10 Bộ thẻ ôn 600 từ vựng' : 'Các bộ thẻ của bạn'}</span>
               <Sparkles className="text-yellow-400" size={26} />
             </h2>
             <p className="text-purple-300/80 text-sm mt-1 max-w-3xl">
-              Mỗi bộ thẻ gồm 3 kỹ năng riêng biệt: <b>Anh &rarr; Việt</b>, <b>Việt &rarr; Anh</b>, và <b>Nghe chính tả</b>. Mỗi kỹ năng đều có thanh tiến độ và phần luyện tập tự do riêng khi đạt 100%.
+              {isDTan
+                ? 'Luyện phản xạ nhanh 600 từ vựng TOEIC với 2 chế độ: Anh ➔ Việt (Nhận diện nghĩa) và Việt ➔ Anh (Phản xạ từ vựng).'
+                : 'Mỗi bộ thẻ gồm 3 kỹ năng riêng biệt: Anh ➔ Việt, Việt ➔ Anh, và Nghe chính tả. Mỗi kỹ năng đều có thanh tiến độ và phần luyện tập tự do riêng khi đạt 100%.'}
             </p>
           </div>
 
@@ -130,47 +196,167 @@ export default function Dashboard() {
         </div>
 
         {/* ========================================================================= */}
-        {/* BANNER LUYỆN TẬP TỔNG HỢP: KHO TOÀN BỘ TỪ ĐÃ THUỘC (TRỌNG SỐ 1)          */}
+        {/* BANNER LUYỆN TẬP TỔNG HỢP: KHO TOÀN BỘ TỪ ĐÃ THUỘC (Ẩn với DTan)          */}
         {/* ========================================================================= */}
-        <div className="mb-8 p-6 md:p-8 rounded-3xl bg-gradient-to-r from-[#44185c] via-[#311142] to-[#200c2c] border-2 border-amber-500/50 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6 group">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/20 transition-all" />
+        {!isDTan && (
+          <div className="mb-8 p-6 md:p-8 rounded-3xl bg-gradient-to-r from-[#44185c] via-[#311142] to-[#200c2c] border-2 border-amber-500/50 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6 group">
+            <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/20 transition-all" />
+
+            <div className="flex items-start space-x-4 z-10">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30 text-purple-950 font-black shrink-0">
+                <Trophy size={32} />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    CHỨC NĂNG MỚI
+                  </span>
+                  <h3 className="text-2xl font-black text-white tracking-wide">
+                    Luyện tập Tổng hợp — Toàn bộ từ đã học thuộc
+                  </h3>
+                </div>
+                <p className="text-sm text-purple-200/80 max-w-2xl">
+                  AI tự động gom tất cả các từ vựng bạn đã thành thạo (đạt <b>trọng số 1</b>) từ mọi bộ thẻ để sinh bài tập ứng dụng ngữ cảnh TOEIC 4 cấp độ (<b>550</b>, <b>700 Đọc</b>, <b>700 Nghe</b>, <b>850</b>).
+                </p>
+                <div className="flex items-center gap-3 pt-1 text-xs">
+                  <span className="text-amber-300 font-extrabold flex items-center gap-1">
+                    <Sparkles size={13} />
+                    Kho hiện tại: <b className="text-white font-mono text-sm">{comprehensiveStatus?.quizProgress || 48}</b> từ đã thuộc
+                  </span>
+                  <span className="text-purple-400">• Đã làm: <b className="text-purple-200">{comprehensiveStatus?.totalCompletedExercises || 0}</b> bài test</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="shrink-0 z-10">
+              <button
+                onClick={() => navigate('/deck/0/exercises')}
+                className="w-full lg:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-black text-sm shadow-xl shadow-amber-500/20 hover:scale-105 active:scale-95 transition cursor-pointer flex items-center justify-center space-x-2.5 border border-amber-300/40"
+              >
+                <Zap size={16} className="text-yellow-200" />
+                <span>Vào Luyện tập Tổng hợp ➔</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* BANNER BARRON'S 600 TOEIC: BÀI TẬP ĐIỀN TỪ & BÀI TEST THEO LESSON        */}
+        {/* ========================================================================= */}
+        <div className="mb-8 p-6 md:p-8 rounded-3xl bg-gradient-to-r from-[#1c224a] via-[#1f163b] to-[#2b0e3b] border-2 border-cyan-400/50 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6 group">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-cyan-500/20 transition-all" />
 
           <div className="flex items-start space-x-4 z-10">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30 text-purple-950 font-black shrink-0">
-              <Trophy size={32} />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-400 via-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/30 text-white font-black shrink-0">
+              <Headphones size={32} />
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  CHỨC NĂNG MỚI
+                <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                  TOEIC PRACTICE &amp; TEST
                 </span>
                 <h3 className="text-2xl font-black text-white tracking-wide">
-                  Luyện tập Tổng hợp — Toàn bộ từ đã học thuộc
+                  Barron's 600 Words — Bài tập Điền từ &amp; Bài Test TOEIC
                 </h3>
               </div>
               <p className="text-sm text-purple-200/80 max-w-2xl">
-                AI tự động gom tất cả các từ vựng bạn đã thành thạo (đạt <b>trọng số 1</b>) từ mọi bộ thẻ để sinh bài tập ứng dụng ngữ cảnh TOEIC 4 cấp độ (<b>550</b>, <b>700 Đọc</b>, <b>700 Nghe</b>, <b>850</b>).
+                Luyện tập trọn bộ <b>50 Lessons</b> với 2 phần chuyên sâu: <b>Words in Context</b> (Word bank tiếng Anh, tự động chấm điểm) và <b>Bài Test TOEIC chuẩn</b> (CD1 track 1-25, CD2 track 1-25, ảnh màu siêu nét Part 1).
               </p>
-              <div className="flex items-center gap-3 pt-1 text-xs">
-                <span className="text-amber-300 font-extrabold flex items-center gap-1">
-                  <Sparkles size={13} />
-                  Kho hiện tại: <b className="text-white font-mono text-sm">{comprehensiveStatus?.quizProgress || 48}</b> từ đã thuộc
-                </span>
-                <span className="text-purple-400">• Đã làm: <b className="text-purple-200">{comprehensiveStatus?.totalCompletedExercises || 0}</b> bài test</span>
+              <div className="pt-3 space-y-2.5">
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <span className="text-cyan-300 font-extrabold flex items-center gap-1">
+                    <Sparkles size={13} /> Nhóm bài:
+                  </span>
+                  {[
+                    { key: '1-10', label: '1 - 10 (CD1)' },
+                    { key: '11-20', label: '11 - 20 (CD1)' },
+                    { key: '21-30', label: '21 - 30 (CD1/2)' },
+                    { key: '31-40', label: '31 - 40 (CD2)' },
+                    { key: '41-50', label: '41 - 50 (CD2)' }
+                  ].map((grp) => (
+                    <button
+                      key={grp.key}
+                      onClick={() => setLessonGroup(grp.key)}
+                      className={`px-2.5 py-1 rounded-xl font-bold transition cursor-pointer border ${
+                        lessonGroup === grp.key
+                          ? 'bg-cyan-500 text-slate-950 border-cyan-300 font-black shadow-md shadow-cyan-500/20'
+                          : 'bg-cyan-950/60 text-cyan-200 border-cyan-800/50 hover:bg-cyan-900/80 hover:text-white'
+                      }`}
+                    >
+                      {grp.label}
+                    </button>
+                  ))}
+
+                  {/* Dropdown chọn nhanh bài bất kỳ từ 1 đến 50 */}
+                  <div className="flex items-center space-x-1.5 ml-auto">
+                    <span className="text-purple-300 text-[11px] font-bold hidden sm:inline">Chọn nhanh:</span>
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value) navigate(`/lesson/${e.target.value}`);
+                      }}
+                      defaultValue=""
+                      className="bg-[#240f3b] text-cyan-200 font-bold text-xs px-2.5 py-1 rounded-xl border border-cyan-500/40 focus:outline-none focus:ring-2 focus:ring-cyan-400 cursor-pointer"
+                    >
+                      <option value="" disabled>-- Chọn Lesson 1 - 50 --</option>
+                      {Array.from({ length: 50 }, (_, i) => i + 1).map((num) => (
+                        <option key={num} value={num} className="bg-[#1f163b] text-white">
+                          Lesson {num} {num <= 25 ? '(CD 1)' : '(CD 2)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Các nút bấm trực tiếp vào từng bài trong nhóm 10 bài đang chọn */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {Array.from({ length: 10 }, (_, i) => {
+                    const offset = {
+                      '1-10': 0,
+                      '11-20': 10,
+                      '21-30': 20,
+                      '31-40': 30,
+                      '41-50': 40
+                    }[lessonGroup] || 0;
+                    const lNum = offset + i + 1;
+                    return (
+                      <button
+                        key={lNum}
+                        onClick={() => navigate(`/lesson/${lNum}`)}
+                        className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 border border-cyan-500/40 font-mono font-bold text-xs transition cursor-pointer active:scale-95 shadow-sm"
+                      >
+                        Lesson {lNum}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="shrink-0 z-10">
             <button
-              onClick={() => navigate('/deck/0/exercises')}
-              className="w-full lg:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-black text-sm shadow-xl shadow-amber-500/20 hover:scale-105 active:scale-95 transition cursor-pointer flex items-center justify-center space-x-2.5 border border-amber-300/40"
+              onClick={() => navigate('/lesson/1')}
+              className="w-full lg:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-black text-sm shadow-xl shadow-cyan-500/20 hover:scale-105 active:scale-95 transition cursor-pointer flex items-center justify-center space-x-2.5 border border-cyan-300/40"
             >
-              <Zap size={16} className="text-yellow-200" />
-              <span>Vào Luyện tập Tổng hợp ➔</span>
+              <FileText size={16} className="text-cyan-200" />
+              <span>Vào Luyện Lesson 1 ➔</span>
             </button>
           </div>
         </div>
+
+        {/* ========================================================================= */}
+        {/* BIỂU ĐỒ THỜI GIAN HỌC THEO NGÀY (Ẩn với DTan)                            */}
+        {/* ========================================================================= */}
+        {!isDTan && (
+          <div className="mb-10">
+            <StudyChart 
+              stats={studyStats} 
+              loading={studyLoading} 
+              onRangeChange={fetchStudyStats} 
+              currentDays={chartDays} 
+            />
+          </div>
+        )}
 
         {/* DANH SÁCH CÁC BỘ THẺ */}
         {loading ? (
@@ -178,7 +364,7 @@ export default function Dashboard() {
             <RefreshCw size={36} className="animate-spin text-purple-400" />
             <div className="text-purple-300 font-bold">Đang tải dữ liệu bộ thẻ...</div>
           </div>
-        ) : decks.length === 0 ? (
+        ) : displayedDecks.length === 0 ? (
           <div className="text-center py-20 bg-purple-950/30 rounded-3xl border border-purple-900/40">
             <BookOpen size={48} className="mx-auto text-purple-400 mb-3 opacity-60" />
             <div className="text-xl font-bold text-white">Chưa có bộ thẻ nào</div>
@@ -186,10 +372,12 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            {decks.map((deck) => {
+            {displayedDecks.map((deck) => {
               const quizProg = deck.progressPercent || 0;
               const revProg = deck.reverseProgressPercent || 0;
               const listProg = deck.listeningProgressPercent || 0;
+              const is600Toeic = (deck.id >= 19 && deck.id <= 28) || deck.name?.includes('600 TOEIC');
+              const partNumber = is600Toeic && deck.id >= 19 ? deck.id - 18 : null;
 
               return (
                 <div 
@@ -202,15 +390,15 @@ export default function Dashboard() {
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs uppercase tracking-widest font-extrabold px-3 py-1 rounded-full bg-purple-900/70 text-purple-200 border border-purple-600/30">
-                        {deck.totalWords} TỪ VỰNG
+                        {partNumber ? `PHẦN ${partNumber} • ${deck.totalWords} TỪ` : `${deck.totalWords} TỪ VỰNG`}
                       </span>
-                      <span className="text-xs text-purple-400 font-medium">
-                        ID: #{deck.id}
+                      <span className="text-xs text-purple-400 font-medium font-mono">
+                        {partNumber ? `Bài ${(deck.id - 19) * 5 + 1} - ${(deck.id - 19) * 5 + 5}` : `ID: #${deck.id}`}
                       </span>
                     </div>
 
                     <h3 className="text-2xl font-black text-white group-hover:text-purple-200 transition mb-1">
-                      {deck.name}
+                      {partNumber ? `Phần ${partNumber}: ${deck.name.replace(/^600\s*TOEIC:\s*/i, '')}` : deck.name}
                     </h3>
                     <p className="text-sm text-purple-300/80 line-clamp-2 min-h-[40px]">
                       {deck.description || "Bộ thẻ từ vựng phản xạ nhanh"}
@@ -331,13 +519,13 @@ export default function Dashboard() {
                     </div>
 
                     {/* ========================================================= */}
-                    {/* KỸ NĂNG 3: LUYỆN NGHE CHÍNH TẢ (PHÁT ÂM, GÕ CHÍNH TẢ)     */}
+                    {/* KỸ NĂNG 3: LUYỆN NGHE & GÕ LẠI TỪ VỰNG (CHÍNH TẢ)          */}
                     {/* ========================================================= */}
                     <div className="bg-[#291038] p-3.5 rounded-2xl border border-purple-800/50 space-y-2.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-1.5 font-bold text-xs text-cyan-300">
                           <Headphones size={14} className="text-cyan-400" />
-                          <span>3. Luyện nghe chính tả (Nghe / Gõ)</span>
+                          <span>3. Nghe &amp; Gõ lại từ vựng (Chính tả)</span>
                         </div>
                         <span className="font-mono font-black text-cyan-400 text-sm">
                           {listProg.toFixed(1)}%
@@ -387,9 +575,9 @@ export default function Dashboard() {
                     </div>
 
                     {/* ========================================================= */}
-                    {/* BÀI TẬP ỨNG DỤNG NGỮ CẢNH TOEIC (550, 700, 850)           */}
+                    {/* BÀI TẬP ỨNG DỤNG NGỮ CẢNH TOEIC (550, 700, 850) (Ẩn với DTan) */}
                     {/* ========================================================= */}
-                    {(() => {
+                    {!isDTan && (() => {
                       const isMasteredAll = 
                         (deck.quizPracticeUnlocked || quizProg >= 100) &&
                         (deck.reversePracticeUnlocked || revProg >= 100) &&
@@ -447,6 +635,39 @@ export default function Dashboard() {
                         </div>
                       );
                     })()}
+
+                    {/* ========================================================= */}
+                    {/* BARRON'S 600 TOEIC: ĐIỀN TỪ & TEST CHO TỪNG LESSON        */}
+                    {/* ========================================================= */}
+                    {deck.id >= 19 && deck.id <= 28 && (
+                      <div className="pt-3 border-t border-purple-800/40 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-extrabold text-cyan-300 flex items-center gap-1.5">
+                            <Headphones size={13} className="text-cyan-400" />
+                            <span>Điền từ &amp; Test TOEIC (5 Lessons):</span>
+                          </span>
+                          <span className="text-[10px] text-purple-400 font-mono">
+                            CD{deck.id <= 23 ? '1' : '2'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {Array.from({ length: 5 }, (_, idx) => {
+                            const lNum = (deck.id - 19) * 5 + idx + 1;
+                            return (
+                              <button
+                                key={lNum}
+                                onClick={() => navigate(`/lesson/${lNum}`)}
+                                className="py-2 px-1 rounded-xl bg-purple-950/80 hover:bg-cyan-600 text-cyan-200 hover:text-white border border-cyan-500/30 hover:border-cyan-400 font-mono font-bold text-xs transition cursor-pointer text-center flex flex-col items-center justify-center space-y-0.5 shadow-sm"
+                                title={`Vào làm Bài tập Điền từ & Test TOEIC Lesson ${lNum}`}
+                              >
+                                <span className="text-[10px] opacity-70">Lesson</span>
+                                <span className="font-black text-sm">{lNum}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                   </div>
 

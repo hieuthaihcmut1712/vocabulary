@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
+import { useProfile } from '../context/ProfileContext';
+import ProfileSwitcher from '../components/ProfileSwitcher';
 import { 
   Flame, 
   Volume2, 
@@ -28,6 +30,7 @@ import {
 export default function ListeningDrillPage() {
   const { deckId } = useParams();
   const navigate = useNavigate();
+  const { profile } = useProfile();
 
   // Trạng thái tải và dữ liệu câu hỏi từ Backend
   const [loading, setLoading] = useState(true);
@@ -206,7 +209,7 @@ export default function ListeningDrillPage() {
   // Khởi tạo lần đầu
   useEffect(() => {
     fetchNextQuestion();
-  }, [fetchNextQuestion]);
+  }, [fetchNextQuestion, profile]);
 
   // Nộp bài chính tả lên Backend
   const handleSubmitSpelling = useCallback(async (e) => {
@@ -401,6 +404,8 @@ export default function ListeningDrillPage() {
             >
               {soundEffectsEnabled ? <Volume2 size={16} /> : <VolumeX size={16} className="text-red-400" />}
             </button>
+
+            <ProfileSwitcher />
           </div>
         </header>
 

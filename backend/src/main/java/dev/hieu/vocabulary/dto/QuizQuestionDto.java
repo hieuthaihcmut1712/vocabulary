@@ -17,7 +17,7 @@ public class QuizQuestionDto {
     private String partOfSpeech;
     private String phonetic;
     private List<String> options; // 4 đáp án (1 đúng + 3 ngẫu nhiên)
-    private Integer currentWeight;
+    private Double currentWeight;
     private Double probabilityPercent; // Tỉ lệ xuất hiện của từ này
     private Integer totalWords;
 

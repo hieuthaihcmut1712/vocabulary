@@ -9,7 +9,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "reverse_word_progress")
+@Table(name = "reverse_word_progress", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_reverse_word_profile", columnNames = {"word_id", "user_profile"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -21,10 +23,14 @@ public class ReverseWordProgress {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "word_id", nullable = false, unique = true)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "word_id", nullable = false)
     @JsonIgnore
     private Word word;
+
+    @Column(name = "user_profile", length = 50)
+    @Builder.Default
+    private String userProfile = "hieu";
 
     @Column(name = "deck_id", nullable = false)
     private Long deckId;

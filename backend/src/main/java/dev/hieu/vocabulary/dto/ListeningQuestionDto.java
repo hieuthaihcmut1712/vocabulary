@@ -18,7 +18,7 @@ public class ListeningQuestionDto {
     private String example;
 
     // Trọng số và xác suất
-    private Integer currentWeight;
+    private Double currentWeight;
     private Double probabilityPercent;
 
     // Thống kê tiến độ nghe của bộ thẻ (thanh tiến độ riêng)

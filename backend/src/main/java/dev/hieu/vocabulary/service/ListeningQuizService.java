@@ -1,5 +1,6 @@
 package dev.hieu.vocabulary.service;
 
+import dev.hieu.vocabulary.config.ProfileContextHolder;
 import dev.hieu.vocabulary.dto.*;
 import dev.hieu.vocabulary.entity.Deck;
 import dev.hieu.vocabulary.entity.ListeningProgress;
@@ -25,8 +26,8 @@ public class ListeningQuizService {
     private final WordRepository wordRepository;
     private final ListeningProgressRepository listeningProgressRepository;
 
-    // Cooldown queue theo từng deck để tránh lặp lại từ vừa nghe
-    private final Map<Long, Queue<Long>> recentListeningWordHistory = new ConcurrentHashMap<>();
+    // Cooldown queue theo từng deck và profile để tránh lặp lại từ vừa nghe
+    private final Map<String, Queue<Long>> recentListeningWordHistory = new ConcurrentHashMap<>();
 
     /**
      * Bốc ngẫu nhiên từ để luyện nghe chính tả theo Roulette Wheel Selection.
@@ -34,7 +35,8 @@ public class ListeningQuizService {
      */
     @Transactional
     public ListeningQuestionDto getNextQuestion(Long deckId) {
-        List<ListeningProgress> allProgress = listeningProgressRepository.findByDeckId(deckId);
+        String currentProfile = ProfileContextHolder.getCurrentProfile();
+        List<ListeningProgress> allProgress = listeningProgressRepository.findByDeckIdAndUserProfile(deckId, currentProfile);
         
         // Nếu chưa có trong bảng listening_progress (dự phòng), tự động khởi tạo với weight = 5
         if (allProgress.isEmpty()) {
@@ -46,6 +48,7 @@ public class ListeningQuizService {
                     .map(w -> ListeningProgress.builder()
                             .deckId(deckId)
                             .word(w)
+                            .userProfile(currentProfile)
                             .weight(5)
                             .correctCount(0)
                             .wrongCount(0)
@@ -68,9 +71,10 @@ public class ListeningQuizService {
         long unlearned = allProgress.stream().filter(lp -> lp.getWeight() == null || lp.getWeight() >= 3).count();
         double currentProgressPercent = calculateListeningProgressPercent(totalWords, mastered, learning);
 
-        // 1. Áp dụng Cooldown Buffer
-        Queue<Long> recentQueue = recentListeningWordHistory.computeIfAbsent(deckId, k -> new LinkedList<>());
-        int cooldownLimit = Math.min(10, Math.max(1, allProgress.size() / 3));
+        // 1. Áp dụng Cooldown Buffer (1/3 số từ của bộ thẻ)
+        String cooldownKey = currentProfile + "_" + deckId;
+        Queue<Long> recentQueue = recentListeningWordHistory.computeIfAbsent(cooldownKey, k -> new LinkedList<>());
+        int cooldownLimit = Math.max(1, allProgress.size() / 3);
 
         List<ListeningProgress> eligible = allProgress.stream()
                 .filter(lp -> !recentQueue.contains(lp.getWord().getId()))
@@ -80,13 +84,13 @@ public class ListeningQuizService {
             eligible = allProgress;
         }
 
-        // 2. Cơ chế 80/20: Ưu tiên từ chưa thuộc (weight >= 3)
+        // 2. Cơ chế 80/20: Ưu tiên từ chưa thuộc (weight > 1)
         List<ListeningProgress> unmasteredPool = eligible.stream()
-                .filter(lp -> lp.getWeight() != null && lp.getWeight() >= 3)
+                .filter(lp -> lp.getWeight() == null || lp.getWeight() > 1)
                 .collect(Collectors.toList());
 
         List<ListeningProgress> masteredPool = eligible.stream()
-                .filter(lp -> lp.getWeight() != null && lp.getWeight() < 3)
+                .filter(lp -> lp.getWeight() != null && lp.getWeight() <= 1)
                 .collect(Collectors.toList());
 
         List<ListeningProgress> poolToPick = eligible;
@@ -95,14 +99,16 @@ public class ListeningQuizService {
             poolToPick = focusUnmastered ? unmasteredPool : masteredPool;
         }
 
-        // 3. Bốc theo Roulette Wheel Selection trong pool đã chọn
-        int totalWeightInPool = poolToPick.stream().mapToInt(lp -> Math.max(1, lp.getWeight())).sum();
-        int randomValue = ThreadLocalRandom.current().nextInt(totalWeightInPool);
-        int accumulatedWeight = 0;
+        // 3. Bốc theo Roulette Wheel Selection trong pool đã chọn (nếu từ về 1 thì tỉ lệ xuất hiện là 0.5)
+        double totalWeightInPool = poolToPick.stream()
+                .mapToDouble(lp -> getEffectiveWeight(lp.getWeight()))
+                .sum();
+        double randomValue = ThreadLocalRandom.current().nextDouble(totalWeightInPool);
+        double accumulatedWeight = 0.0;
         ListeningProgress selected = poolToPick.get(0);
 
         for (ListeningProgress lp : poolToPick) {
-            accumulatedWeight += Math.max(1, lp.getWeight());
+            accumulatedWeight += getEffectiveWeight(lp.getWeight());
             if (randomValue < accumulatedWeight) {
                 selected = lp;
                 break;
@@ -116,8 +122,11 @@ public class ListeningQuizService {
         }
 
         Word word = selected.getWord();
-        int totalAllWeight = allProgress.stream().mapToInt(lp -> Math.max(1, lp.getWeight())).sum();
-        double probabilityPercent = ((double) selected.getWeight() / totalAllWeight) * 100.0;
+        double totalAllWeight = allProgress.stream()
+                .mapToDouble(lp -> getEffectiveWeight(lp.getWeight()))
+                .sum();
+        double effectiveWeight = getEffectiveWeight(selected.getWeight());
+        double probabilityPercent = (effectiveWeight / totalAllWeight) * 100.0;
 
         return ListeningQuestionDto.builder()
                 .wordId(word.getId())
@@ -126,7 +135,7 @@ public class ListeningQuizService {
                 .partOfSpeech(word.getPartOfSpeech())
                 .phonetic(word.getPhonetic())
                 .example(word.getExample())
-                .currentWeight(selected.getWeight())
+                .currentWeight(effectiveWeight)
                 .probabilityPercent(Math.round(probabilityPercent * 10.0) / 10.0)
                 .deckProgressPercent(currentProgressPercent)
                 .masteredWords(mastered)
@@ -148,14 +157,16 @@ public class ListeningQuizService {
      */
     @Transactional
     public ListeningResultDto submitAnswer(ListeningSubmitRequest request) {
+        String currentProfile = ProfileContextHolder.getCurrentProfile();
         Word word = wordRepository.findById(request.getWordId())
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy từ vựng ID: " + request.getWordId()));
 
-        ListeningProgress progress = listeningProgressRepository.findByWordId(word.getId())
+        ListeningProgress progress = listeningProgressRepository.findByWordIdAndUserProfile(word.getId(), currentProfile)
                 .orElseGet(() -> {
                     ListeningProgress lp = ListeningProgress.builder()
                             .deckId(word.getDeck().getId())
                             .word(word)
+                            .userProfile(currentProfile)
                             .weight(5)
                             .correctCount(0)
                             .wrongCount(0)
@@ -200,8 +211,8 @@ public class ListeningQuizService {
         progress.setLastReviewedAt(LocalDateTime.now());
         listeningProgressRepository.save(progress);
 
-        // Tính lại tiến độ bộ thẻ ngay lập tức
-        List<ListeningProgress> allProgress = listeningProgressRepository.findByDeckId(progress.getDeckId());
+        // Tính lại tiến độ bộ thẻ ngay lập tức theo profile
+        List<ListeningProgress> allProgress = listeningProgressRepository.findByDeckIdAndUserProfile(progress.getDeckId(), currentProfile);
         int totalWords = allProgress.size();
         long mastered = allProgress.stream().filter(lp -> lp.getWeight() != null && lp.getWeight() == 1).count();
         long learning = allProgress.stream().filter(lp -> lp.getWeight() != null && lp.getWeight() > 1 && lp.getWeight() < 3).count();
@@ -239,10 +250,11 @@ public class ListeningQuizService {
      */
     @Transactional
     public ListeningPracticeInitDto getPracticeInit(Long deckId) {
+        String currentProfile = ProfileContextHolder.getCurrentProfile();
         Deck deck = deckRepository.findById(deckId).orElse(null);
         String deckName = deck != null ? deck.getName() : "Bộ từ vựng";
 
-        List<ListeningProgress> allProgress = listeningProgressRepository.findByDeckId(deckId);
+        List<ListeningProgress> allProgress = listeningProgressRepository.findByDeckIdAndUserProfile(deckId, currentProfile);
         int totalWords = allProgress.size();
         long mastered = allProgress.stream().filter(lp -> lp.getWeight() != null && lp.getWeight() == 1).count();
         long learning = allProgress.stream().filter(lp -> lp.getWeight() != null && lp.getWeight() > 1 && lp.getWeight() < 3).count();
@@ -272,6 +284,13 @@ public class ListeningQuizService {
                 .unlocked(unlocked)
                 .words(wordDtos)
                 .build();
+    }
+
+    private double getEffectiveWeight(Integer weight) {
+        if (weight == null) {
+            return 3.0;
+        }
+        return weight <= 1 ? 0.5 : (double) weight;
     }
 
     public double calculateListeningProgressPercent(int totalWords, long mastered, long learning) {

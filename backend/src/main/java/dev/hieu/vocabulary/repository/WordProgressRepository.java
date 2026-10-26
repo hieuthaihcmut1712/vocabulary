@@ -12,4 +12,8 @@ public interface WordProgressRepository extends JpaRepository<WordProgress, Long
     Optional<WordProgress> findByWordId(Long wordId);
     List<WordProgress> findByDeckId(Long deckId);
     List<WordProgress> findByWeight(Integer weight);
+
+    Optional<WordProgress> findByWordIdAndUserProfile(Long wordId, String userProfile);
+    List<WordProgress> findByDeckIdAndUserProfile(Long deckId, String userProfile);
+    List<WordProgress> findByWeightAndUserProfile(Integer weight, String userProfile);
 }

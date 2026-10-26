@@ -51,6 +51,10 @@ public class ExerciseHistory {
     @Column(name = "audio_script", columnDefinition = "TEXT")
     private String audioScript;
 
+    @Column(name = "user_profile", length = 50)
+    @Builder.Default
+    private String userProfile = "hieu";
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();

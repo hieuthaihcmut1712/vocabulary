@@ -18,6 +18,7 @@ dist/
 **/dist/
 build/
 **/build/
+backend/src/main/resources/static/
 
 # Node dependencies
 node_modules/
@@ -37,6 +38,18 @@ pnpm-debug.log*
 *.local
 *application-local.properties
 **/application-local.properties
+*.pem
+*.key
+
+# Backups & Scratch
+backup*.sql
+scratch/
+
+# Large binaries & test media
+CD1/
+CD2/
+*.pdf
+tuvung*.jpg
 
 # Temporary and Conversation files
 ID.md

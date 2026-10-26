@@ -14,7 +14,9 @@ public class SpaWebController {
         "/deck/**",
         "/quiz/**",
         "/practice/**",
-        "/exercises/**"
+        "/exercises/**",
+        "/lesson/**",
+        "/lesson-test/**"
     })
     public String forwardSpaRoutes() {
         return "forward:/index.html";

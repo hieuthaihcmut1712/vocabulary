@@ -41,8 +41,10 @@ public class Word {
     @Column(columnDefinition = "TEXT")
     private String example; // Ví dụ minh họa
 
-    @OneToOne(mappedBy = "word", cascade = CascadeType.ALL, orphanRemoval = true)
-    private WordProgress progress;
+    @OneToMany(mappedBy = "word", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    @Builder.Default
+    private java.util.List<WordProgress> progressList = new java.util.ArrayList<>();
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

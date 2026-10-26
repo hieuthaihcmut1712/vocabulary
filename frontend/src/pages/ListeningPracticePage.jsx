@@ -19,12 +19,17 @@ import {
   Snail, 
   RotateCcw, 
   Lock, 
-  Target 
+  Target,
+  Clock
 } from 'lucide-react';
+import { useStudyTracker } from '../hooks/useStudyTracker';
+import { useProfile } from '../context/ProfileContext';
+import ProfileSwitcher from '../components/ProfileSwitcher';
 
 export default function ListeningPracticePage() {
   const { deckId } = useParams();
   const navigate = useNavigate();
+  const { profile, isDTan } = useProfile();
 
   // Khởi tạo danh sách từ vựng & Deck info
   const [loading, setLoading] = useState(true);
@@ -32,6 +37,9 @@ export default function ListeningPracticePage() {
   const [dbProgress, setDbProgress] = useState(0);
   const [deckName, setDeckName] = useState('Bộ từ vựng');
   const [words, setWords] = useState([]);
+
+  // Live Study Timer
+  const { formattedSessionTime, isActive } = useStudyTracker({ mode: 'LISTENING', deckId, enabled: !isDTan });
 
   // Trọng số in-memory (KHÔNG lưu Database)
   // Mỗi từ khởi tạo trọng số = 5, min = 1, max = 10
@@ -171,19 +179,24 @@ export default function ListeningPracticePage() {
     setListenCount(1);
 
     const recentQueue = recentHistoryRef.current;
-    const cooldownLimit = Math.min(8, Math.max(1, Math.floor(wordList.length / 3)));
+    const cooldownLimit = Math.max(1, Math.floor(wordList.length / 3));
 
     let candidates = wordList.filter(w => !recentQueue.includes(w.id));
     if (candidates.length === 0) {
       candidates = wordList;
     }
 
-    const totalWeight = candidates.reduce((sum, w) => sum + (weights[w.id] || 5), 0);
+    const getEffectiveWeight = (wId) => {
+      const wt = weights[wId] !== undefined ? weights[wId] : 5;
+      return wt <= 1 ? 0.5 : wt;
+    };
+
+    const totalWeight = candidates.reduce((sum, w) => sum + getEffectiveWeight(w.id), 0);
     let randomVal = Math.random() * totalWeight;
     let chosenWord = candidates[0];
 
     for (const w of candidates) {
-      const wWeight = weights[w.id] || 5;
+      const wWeight = getEffectiveWeight(w.id);
       randomVal -= wWeight;
       if (randomVal <= 0) {
         chosenWord = w;
@@ -240,7 +253,7 @@ export default function ListeningPracticePage() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, profile]);
 
   // Nút Reset toàn bộ trọng số về 5
   const handleResetWeights = () => {
@@ -481,6 +494,21 @@ export default function ListeningPracticePage() {
               <Flame size={14} className={streak > 0 ? 'text-amber-400 fill-amber-400 animate-pulse' : 'text-purple-400'} />
               <span>{streak} chuỗi</span>
             </div>
+
+            {/* Đồng hồ đếm thời gian học (Ẩn với DTan) */}
+            {!isDTan && (
+              <div
+                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-xl border text-xs font-semibold shadow-sm transition-all ${
+                  isActive 
+                    ? 'bg-purple-900/60 border-purple-700/60 text-purple-200' 
+                    : 'bg-zinc-800/40 border-zinc-700/40 text-zinc-400 opacity-60'
+                }`}
+                title={isActive ? "Đang đếm thời gian học chủ động" : "Tạm dừng đếm giờ (tab ẩn hoặc nhàn rỗi)"}
+              >
+                <Clock size={13} className={isActive ? "text-cyan-400 animate-pulse" : "text-zinc-500"} />
+                <span className="font-mono text-xs">{formattedSessionTime}</span>
+              </div>
+            )}
           </div>
 
           {/* Badge Luyện tập tự do */}
@@ -503,6 +531,8 @@ export default function ListeningPracticePage() {
             >
               <RotateCcw size={16} />
             </button>
+
+            <ProfileSwitcher />
           </div>
         </header>
 

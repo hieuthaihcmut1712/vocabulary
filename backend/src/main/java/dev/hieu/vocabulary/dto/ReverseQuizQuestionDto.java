@@ -18,7 +18,7 @@ public class ReverseQuizQuestionDto {
     private List<String> options;  // 4 lựa chọn là các từ / cụm từ tiếng Anh
 
     // Trọng số và xác suất
-    private Integer currentWeight;
+    private Double currentWeight;
     private Double probabilityPercent;
 
     // Tiến độ bộ thẻ Việt -> Anh

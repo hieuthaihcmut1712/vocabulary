@@ -2,6 +2,7 @@ package dev.hieu.vocabulary.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.hieu.vocabulary.config.ProfileContextHolder;
 import dev.hieu.vocabulary.dto.*;
 import dev.hieu.vocabulary.entity.Deck;
 import dev.hieu.vocabulary.entity.ExerciseHistory;
@@ -41,7 +42,8 @@ public class AppliedExerciseService {
 
         if (deckId <= 0L) {
             // Chế độ Luyện tập Tổng hợp: Lấy toàn bộ từ có trọng số 1 (mastered)
-            List<dev.hieu.vocabulary.entity.WordProgress> masteredProgress = wordProgressRepository.findByWeight(1);
+            String profile = ProfileContextHolder.getProfile();
+            List<dev.hieu.vocabulary.entity.WordProgress> masteredProgress = wordProgressRepository.findByWeightAndUserProfile(1, profile);
             List<Word> words = masteredProgress.stream()
                     .map(dev.hieu.vocabulary.entity.WordProgress::getWord)
                     .filter(java.util.Objects::nonNull)
@@ -125,6 +127,7 @@ public class AppliedExerciseService {
                 .isPassed(isPassed)
                 .explanation(request.getExplanation())
                 .audioScript(request.getAudioScript())
+                .userProfile(ProfileContextHolder.getProfile())
                 .build();
 
         ExerciseHistory saved = exerciseHistoryRepository.save(history);
@@ -144,11 +147,12 @@ public class AppliedExerciseService {
      */
     @Transactional(readOnly = true)
     public List<ExerciseHistoryDetailDto> getHistoryByDeck(Long deckId) {
+        String profile = ProfileContextHolder.getProfile();
         List<ExerciseHistory> list;
         if (deckId == null || deckId <= 0L) {
-            list = exerciseHistoryRepository.findByDeckIsNullOrderByCreatedAtDesc();
+            list = exerciseHistoryRepository.findByDeckIsNullAndUserProfileOrderByCreatedAtDesc(profile);
         } else {
-            list = exerciseHistoryRepository.findByDeckIdOrderByCreatedAtDesc(deckId);
+            list = exerciseHistoryRepository.findByDeckIdAndUserProfileOrderByCreatedAtDesc(deckId, profile);
         }
         List<ExerciseHistoryDetailDto> dtos = new ArrayList<>();
 
@@ -163,8 +167,10 @@ public class AppliedExerciseService {
      */
     @Transactional(readOnly = true)
     public ExerciseHistoryDetailDto getHistoryDetail(Long id) {
-        ExerciseHistory h = exerciseHistoryRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bài tập lịch sử ID: " + id));
+        String profile = ProfileContextHolder.getProfile();
+        ExerciseHistory h = exerciseHistoryRepository.findByIdAndUserProfile(id, profile)
+                .orElseGet(() -> exerciseHistoryRepository.findById(id)
+                        .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bài tập lịch sử ID: " + id)));
         return mapToDetailDto(h);
     }
 
@@ -173,10 +179,11 @@ public class AppliedExerciseService {
      */
     @Transactional(readOnly = true)
     public ExerciseStatusDto getExerciseStatus(Long deckId) {
+        String profile = ProfileContextHolder.getProfile();
         if (deckId == null || deckId <= 0L) {
-            List<dev.hieu.vocabulary.entity.WordProgress> masteredProgress = wordProgressRepository.findByWeight(1);
+            List<dev.hieu.vocabulary.entity.WordProgress> masteredProgress = wordProgressRepository.findByWeightAndUserProfile(1, profile);
             int masteredCount = masteredProgress.size();
-            int totalExercises = exerciseHistoryRepository.findByDeckIsNullOrderByCreatedAtDesc().size();
+            int totalExercises = exerciseHistoryRepository.findByDeckIsNullAndUserProfileOrderByCreatedAtDesc(profile).size();
             return ExerciseStatusDto.builder()
                     .deckId(0L)
                     .deckName("Luyện tập Tổng hợp (Kho từ đã thuộc)")
@@ -201,13 +208,14 @@ public class AppliedExerciseService {
         double revProg = currentSummary != null ? currentSummary.getReverseProgressPercent() : 0.0;
         double listProg = currentSummary != null ? currentSummary.getListeningProgressPercent() : 0.0;
 
+        boolean isDTan = "dtan".equalsIgnoreCase(profile);
         boolean quizUnlocked = Boolean.TRUE.equals(deck.getQuizPracticeUnlocked()) || quizProg >= 100.0;
         boolean revUnlocked = Boolean.TRUE.equals(deck.getReversePracticeUnlocked()) || revProg >= 100.0;
         boolean listUnlocked = Boolean.TRUE.equals(deck.getListeningPracticeUnlocked()) || listProg >= 100.0;
 
-        boolean isUnlocked = quizUnlocked && revUnlocked && listUnlocked;
+        boolean isUnlocked = isDTan ? true : (quizUnlocked && revUnlocked && listUnlocked);
 
-        int totalExercises = exerciseHistoryRepository.findByDeckIdOrderByCreatedAtDesc(deckId).size();
+        int totalExercises = exerciseHistoryRepository.findByDeckIdAndUserProfileOrderByCreatedAtDesc(deckId, profile).size();
 
         return ExerciseStatusDto.builder()
                 .deckId(deckId)

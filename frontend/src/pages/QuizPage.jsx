@@ -18,6 +18,7 @@ import {
   BookOpen,
   Trophy
 } from 'lucide-react';
+import { useStudyTracker } from '../hooks/useStudyTracker';
 
 const CARD_THEMES = [
   'quiz-card-blue',
@@ -29,6 +30,9 @@ const CARD_THEMES = [
 export default function QuizPage() {
   const { deckId } = useParams();
   const navigate = useNavigate();
+
+  // Đếm thời gian học chủ động
+  const { formattedSessionTime, isActive } = useStudyTracker({ mode: 'QUIZ', deckId });
 
   const [question, setQuestion] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -358,6 +362,19 @@ export default function QuizPage() {
               <span>Streak:</span>
               <span className="font-extrabold text-sm">{streak}</span>
             </div>
+
+            {/* Thời gian học phiên hiện tại */}
+            <div 
+              className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
+                isActive 
+                  ? 'bg-purple-900/60 border-purple-700/60 text-purple-200' 
+                  : 'bg-zinc-800/40 border-zinc-700/40 text-zinc-400 opacity-60'
+              }`}
+              title={isActive ? "Đang đếm thời gian học chủ động" : "Tạm dừng đếm giờ (tab ẩn hoặc nhàn rỗi)"}
+            >
+              <Clock size={13} className={isActive ? "text-cyan-400 animate-pulse" : "text-zinc-500"} />
+              <span className="font-mono text-xs">{formattedSessionTime}</span>
+            </div>
           </div>
 
           {/* Nhóm giữa: Đồng hồ phản xạ thời gian thực */}
@@ -373,7 +390,7 @@ export default function QuizPage() {
             <div className="bg-purple-950/60 px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 flex items-center space-x-1.5 border border-purple-900/30">
               <Sparkles size={13} className="text-yellow-400" />
               <span className="hidden md:inline">Trọng số:</span>
-              <span className="text-yellow-300 font-bold text-sm">{question?.currentWeight || 10}</span>
+              <span className="text-yellow-300 font-bold text-sm">{question?.currentWeight ?? 10}</span>
             </div>
 
             <div className="bg-amber-500/20 border border-amber-500/40 px-3 py-1.5 rounded-xl flex items-center space-x-1 text-amber-300 font-bold text-xs shadow-sm">
@@ -470,7 +487,7 @@ export default function QuizPage() {
             {result && result.isCorrect && (
               <div className="animate-bounce-pop text-sm md:text-base font-bold py-2.5 px-6 rounded-2xl flex items-center gap-2 bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 shadow-lg">
                 <CheckCircle2 size={20} className="text-emerald-400" />
-                <span>{result.feedbackMessage} | Trọng số: <b>{result.oldWeight} ➔ {result.newWeight}</b> ({result.weightDelta})</span>
+                <span>{result.feedbackMessage} | Trọng số: <b>{result.oldWeight} ➔ {result.newWeight === 1 ? '1 (Tỉ lệ 0.5)' : result.newWeight}</b> ({result.weightDelta})</span>
               </div>
             )}
 

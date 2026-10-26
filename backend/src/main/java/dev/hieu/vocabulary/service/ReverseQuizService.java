@@ -1,5 +1,6 @@
 package dev.hieu.vocabulary.service;
 
+import dev.hieu.vocabulary.config.ProfileContextHolder;
 import dev.hieu.vocabulary.dto.*;
 import dev.hieu.vocabulary.entity.Deck;
 import dev.hieu.vocabulary.entity.ReverseWordProgress;
@@ -25,8 +26,8 @@ public class ReverseQuizService {
     private final WordRepository wordRepository;
     private final ReverseWordProgressRepository reverseWordProgressRepository;
 
-    // Cooldown queue theo từng deck để tránh lặp lại từ vừa xuất hiện
-    private final Map<Long, Queue<Long>> recentReverseWordHistory = new ConcurrentHashMap<>();
+    // Cooldown queue theo từng deck và profile để tránh lặp lại từ vừa xuất hiện
+    private final Map<String, Queue<Long>> recentReverseWordHistory = new ConcurrentHashMap<>();
 
     /**
      * Bốc ngẫu nhiên câu hỏi Quizziz Việt -> Anh (Đề: Nghĩa tiếng Việt, Chọn: Từ tiếng Anh)
@@ -34,7 +35,8 @@ public class ReverseQuizService {
      */
     @Transactional
     public ReverseQuizQuestionDto getNextQuestion(Long deckId) {
-        List<ReverseWordProgress> allProgress = reverseWordProgressRepository.findByDeckId(deckId);
+        String profile = ProfileContextHolder.getProfile();
+        List<ReverseWordProgress> allProgress = reverseWordProgressRepository.findByDeckIdAndUserProfile(deckId, profile);
 
         // Khởi tạo dự phòng nếu chưa có
         if (allProgress.isEmpty()) {
@@ -49,6 +51,7 @@ public class ReverseQuizService {
                             .weight(10)
                             .correctCount(0)
                             .wrongCount(0)
+                            .userProfile(profile)
                             .build())
                     .collect(Collectors.toList());
             allProgress = reverseWordProgressRepository.saveAll(newProgressList);
@@ -64,9 +67,10 @@ public class ReverseQuizService {
         long unlearned = allProgress.stream().filter(rp -> rp.getWeight() == null || rp.getWeight() >= 5).count();
         double currentProgressPercent = calculateProgressPercent(totalWords, mastered, learning);
 
-        // 1. Áp dụng Cooldown Buffer
-        Queue<Long> recentQueue = recentReverseWordHistory.computeIfAbsent(deckId, k -> new LinkedList<>());
-        int cooldownLimit = Math.min(10, Math.max(1, allProgress.size() / 3));
+        // 1. Áp dụng Cooldown Buffer (1/3 số từ của bộ thẻ)
+        String historyKey = deckId + ":" + profile;
+        Queue<Long> recentQueue = recentReverseWordHistory.computeIfAbsent(historyKey, k -> new LinkedList<>());
+        int cooldownLimit = Math.max(1, allProgress.size() / 3);
 
         List<ReverseWordProgress> eligible = allProgress.stream()
                 .filter(rp -> !recentQueue.contains(rp.getWord().getId()))
@@ -76,13 +80,13 @@ public class ReverseQuizService {
             eligible = allProgress;
         }
 
-        // 2. Cơ chế 80/20: Ưu tiên từ chưa thuộc (weight >= 5)
+        // 2. Cơ chế 80/20: Ưu tiên từ chưa thuộc (weight > 1)
         List<ReverseWordProgress> unmasteredPool = eligible.stream()
-                .filter(rp -> rp.getWeight() != null && rp.getWeight() >= 5)
+                .filter(rp -> rp.getWeight() == null || rp.getWeight() > 1)
                 .collect(Collectors.toList());
 
         List<ReverseWordProgress> masteredPool = eligible.stream()
-                .filter(rp -> rp.getWeight() != null && rp.getWeight() < 5)
+                .filter(rp -> rp.getWeight() != null && rp.getWeight() <= 1)
                 .collect(Collectors.toList());
 
         List<ReverseWordProgress> poolToPick = eligible;
@@ -91,14 +95,16 @@ public class ReverseQuizService {
             poolToPick = focusUnmastered ? unmasteredPool : masteredPool;
         }
 
-        // 3. Bốc theo Roulette Wheel Selection trong pool đã chọn
-        int totalWeightInPool = poolToPick.stream().mapToInt(rp -> Math.max(1, rp.getWeight())).sum();
-        int randomValue = ThreadLocalRandom.current().nextInt(totalWeightInPool);
-        int accumulatedWeight = 0;
+        // 3. Bốc theo Roulette Wheel Selection trong pool đã chọn (nếu từ về 1 thì tỉ lệ xuất hiện là 0.5)
+        double totalWeightInPool = poolToPick.stream()
+                .mapToDouble(rp -> getEffectiveWeight(rp.getWeight()))
+                .sum();
+        double randomValue = ThreadLocalRandom.current().nextDouble(totalWeightInPool);
+        double accumulatedWeight = 0.0;
         ReverseWordProgress selected = poolToPick.get(0);
 
         for (ReverseWordProgress rp : poolToPick) {
-            accumulatedWeight += Math.max(1, rp.getWeight());
+            accumulatedWeight += getEffectiveWeight(rp.getWeight());
             if (randomValue < accumulatedWeight) {
                 selected = rp;
                 break;
@@ -111,8 +117,11 @@ public class ReverseQuizService {
         }
 
         Word targetWord = selected.getWord();
-        int totalAllWeight = allProgress.stream().mapToInt(rp -> Math.max(1, rp.getWeight())).sum();
-        double probabilityPercent = ((double) selected.getWeight() / totalAllWeight) * 100.0;
+        double totalAllWeight = allProgress.stream()
+                .mapToDouble(rp -> getEffectiveWeight(rp.getWeight()))
+                .sum();
+        double effectiveWeight = getEffectiveWeight(selected.getWeight());
+        double probabilityPercent = (effectiveWeight / totalAllWeight) * 100.0;
 
         // Sinh 4 lựa chọn (chọn từ tiếng Anh): 1 đáp án đúng + 3 đáp án gây nhiễu
         List<String> otherTerms = allProgress.stream()
@@ -138,7 +147,7 @@ public class ReverseQuizService {
                 .meaning(targetWord.getMeaning()) // Đề bài hiển thị: Nghĩa tiếng Việt
                 .partOfSpeech(targetWord.getPartOfSpeech())
                 .options(options)                 // 4 đáp án chọn: Từ tiếng Anh
-                .currentWeight(selected.getWeight())
+                .currentWeight(effectiveWeight)
                 .probabilityPercent(Math.round(probabilityPercent * 10.0) / 10.0)
                 .deckProgressPercent(currentProgressPercent)
                 .masteredWords(mastered)
@@ -157,10 +166,12 @@ public class ReverseQuizService {
      */
     @Transactional
     public ReverseQuizResultDto submitAnswer(ReverseQuizSubmitRequest request) {
+        String profile = ProfileContextHolder.getProfile();
+        boolean isDTan = "dtan".equalsIgnoreCase(profile);
         Word word = wordRepository.findById(request.getWordId())
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy từ vựng ID: " + request.getWordId()));
 
-        ReverseWordProgress progress = reverseWordProgressRepository.findByWordId(word.getId())
+        ReverseWordProgress progress = reverseWordProgressRepository.findByWordIdAndUserProfile(word.getId(), profile)
                 .orElseGet(() -> {
                     ReverseWordProgress rwp = ReverseWordProgress.builder()
                             .deckId(word.getDeck().getId())
@@ -168,6 +179,7 @@ public class ReverseQuizService {
                             .weight(10)
                             .correctCount(0)
                             .wrongCount(0)
+                            .userProfile(profile)
                             .build();
                     return reverseWordProgressRepository.save(rwp);
                 });
@@ -207,14 +219,14 @@ public class ReverseQuizService {
         reverseWordProgressRepository.save(progress);
 
         // Tính toán lại tiến độ bộ thẻ
-        List<ReverseWordProgress> allProgress = reverseWordProgressRepository.findByDeckId(progress.getDeckId());
+        List<ReverseWordProgress> allProgress = reverseWordProgressRepository.findByDeckIdAndUserProfile(progress.getDeckId(), profile);
         int totalWords = allProgress.size();
         long mastered = allProgress.stream().filter(rp -> rp.getWeight() != null && rp.getWeight() == 1).count();
         long learning = allProgress.stream().filter(rp -> rp.getWeight() != null && rp.getWeight() > 1 && rp.getWeight() < 5).count();
         long unlearned = allProgress.stream().filter(rp -> rp.getWeight() == null || rp.getWeight() >= 5).count();
         double updatedProgressPercent = calculateProgressPercent(totalWords, mastered, learning);
 
-        if (updatedProgressPercent >= 100.0) {
+        if (!isDTan && updatedProgressPercent >= 100.0) {
             Deck deck = deckRepository.findById(progress.getDeckId()).orElse(null);
             if (deck != null && !Boolean.TRUE.equals(deck.getReversePracticeUnlocked())) {
                 deck.setReversePracticeUnlocked(true);
@@ -243,17 +255,21 @@ public class ReverseQuizService {
      */
     @Transactional
     public ReversePracticeInitDto getPracticeInit(Long deckId) {
+        String profile = ProfileContextHolder.getProfile();
+        boolean isDTan = "dtan".equalsIgnoreCase(profile);
         Deck deck = deckRepository.findById(deckId).orElse(null);
         String deckName = deck != null ? deck.getName() : "Bộ từ vựng";
 
-        List<ReverseWordProgress> allProgress = reverseWordProgressRepository.findByDeckId(deckId);
+        List<ReverseWordProgress> allProgress = reverseWordProgressRepository.findByDeckIdAndUserProfile(deckId, profile);
         int totalWords = allProgress.size();
         long mastered = allProgress.stream().filter(rp -> rp.getWeight() != null && rp.getWeight() == 1).count();
         long learning = allProgress.stream().filter(rp -> rp.getWeight() != null && rp.getWeight() > 1 && rp.getWeight() < 5).count();
         double progressPercent = calculateProgressPercent(totalWords, mastered, learning);
 
-        boolean unlocked = (deck != null && Boolean.TRUE.equals(deck.getReversePracticeUnlocked())) || progressPercent >= 100.0;
-        if (deck != null && progressPercent >= 100.0 && !Boolean.TRUE.equals(deck.getReversePracticeUnlocked())) {
+        boolean unlocked = isDTan 
+                ? progressPercent >= 100.0 
+                : ((deck != null && Boolean.TRUE.equals(deck.getReversePracticeUnlocked())) || progressPercent >= 100.0);
+        if (!isDTan && deck != null && progressPercent >= 100.0 && !Boolean.TRUE.equals(deck.getReversePracticeUnlocked())) {
             deck.setReversePracticeUnlocked(true);
             deckRepository.save(deck);
         }
@@ -276,6 +292,13 @@ public class ReverseQuizService {
                 .unlocked(unlocked)
                 .words(wordDtos)
                 .build();
+    }
+
+    private double getEffectiveWeight(Integer weight) {
+        if (weight == null) {
+            return 5.0;
+        }
+        return weight <= 1 ? 0.5 : (double) weight;
     }
 
     public double calculateProgressPercent(int totalWords, long mastered, long learning) {

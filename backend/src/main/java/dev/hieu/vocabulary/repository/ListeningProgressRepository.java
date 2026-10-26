@@ -12,7 +12,11 @@ public interface ListeningProgressRepository extends JpaRepository<ListeningProg
 
     List<ListeningProgress> findByDeckId(Long deckId);
 
+    List<ListeningProgress> findByDeckIdAndUserProfile(Long deckId, String userProfile);
+
     Optional<ListeningProgress> findByWordId(Long wordId);
+
+    Optional<ListeningProgress> findByWordIdAndUserProfile(Long wordId, String userProfile);
 
     void deleteByDeckId(Long deckId);
 }
